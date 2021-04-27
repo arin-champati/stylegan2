@@ -17,7 +17,7 @@ class Projector:
     def __init__(self):
         self.num_steps                  = 1000
         self.dlatent_avg_samples        = 10000
-        self.initial_learning_rate      = 0.1
+        self.initial_learning_rate      = 0.2
         self.initial_noise_factor       = 0.05
         self.lr_rampdown_length         = 0.25
         self.lr_rampup_length           = 0.05
@@ -59,7 +59,10 @@ class Projector:
             return
         if self.clone_net:
             self._Gs = self._Gs.clone()
-
+        
+        self.Gs_kwargs = dnnlib.EasyDict()
+        self.Gs_kwargs.truncation_psi = 0.7
+        
         # Find dlatent stats.
         self._info('Finding W midpoint and stddev using %d samples...' % self.dlatent_avg_samples)
         latent_samples = np.random.RandomState(123).randn(self.dlatent_avg_samples, *self._Gs.input_shapes[0][1:])
@@ -93,7 +96,7 @@ class Projector:
         self._noise_in = tf.placeholder(tf.float32, [], name='noise_in')
         dlatents_noise = tf.random.normal(shape=self._dlatents_var.shape) * self._noise_in
         self._dlatents_expr = tf.tile(self._dlatents_var + dlatents_noise, [1, self._Gs.components.synthesis.input_shape[1], 1])
-        self._images_expr = self._Gs.components.synthesis.get_output_for(self._dlatents_expr, randomize_noise=False)
+        self._images_expr = self._Gs.components.synthesis.get_output_for(self._dlatents_expr, randomize_noise=False, truncation_psi=0.7)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         proc_images_expr = (self._images_expr + 1) * (255 / 2)
@@ -104,11 +107,16 @@ class Projector:
 
         # Loss graph.
         self._info('Building loss graph...')
-        self._target_images_var = tf.Variable(tf.zeros(proc_images_expr.shape), name='target_images_var')
+        self._target_images_var = tf.Variable(tf.zeros(proc_images_expr.shape), name='target_images_var')  
+        
         if self._lpips is None:
             self._lpips = misc.load_pkl('https://nvlabs-fi-cdn.nvidia.com/stylegan/networks/metrics/vgg16_zhang_perceptual.pkl')
-        self._dist = self._lpips.get_output_for(proc_images_expr, self._target_images_var)
-        self._loss = tf.reduce_sum(self._dist)
+        self._dist = self._lpips.get_output_for(proc_images_expr, self._target_images_var)        
+        self._dist += tf.math.abs(proc_images_expr - self._target_images_var)
+        
+         # CUSTOM LOSS  
+        # self._loss = tf.reduce_sum(self._dist)
+        self._loss = tf.reduce_mean(self._dist)
 
         # Noise regularization graph.
         self._info('Building noise regularization graph...')
@@ -186,10 +194,10 @@ class Projector:
 
         # Print status.
         self._cur_step += 1
-        if self._cur_step == self.num_steps or self._cur_step % 10 == 0:
-            self._info('%-8d%-12g%-12g' % (self._cur_step, dist_value, loss_value))
-        if self._cur_step == self.num_steps:
-            self._info('Done.')
+        # if self._cur_step == self.num_steps or self._cur_step % 10 == 0:
+        #     self._info('%-8d%-12g%-12g' % (self._cur_step, dist_value, loss_value))
+        # if self._cur_step == self.num_steps:
+        #     self._info('Done.')
 
     def get_cur_step(self):
         return self._cur_step
@@ -204,3 +212,4 @@ class Projector:
         return tflib.run(self._images_expr, {self._noise_in: 0})
 
 #----------------------------------------------------------------------------
+
