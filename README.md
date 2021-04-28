@@ -1,4 +1,6 @@
-## StyleGAN2 &mdash; Official TensorFlow Implementation
+## StyleGAN2 &mdash; Official TensorFlow Implementation with Projector Change
+
+I added the absolute error to the projection loss to aid in more accurate projection of unnatural images.
 
 ![Teaser image](./docs/stylegan2-teaser-1024x256.png)
 
